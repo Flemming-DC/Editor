@@ -7,6 +7,8 @@ from PyQt5.Qsci import *
 from PyQt5.QtWidgets import QWidget
 import sys, os
 from pathlib import Path
+import keyword
+import pkgutil # list of installed packages
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -31,9 +33,7 @@ class MainWindow(QMainWindow):
 
         self.show()
 
-    def get_editor(self) -> QsciScintilla: 
-        # it makes the editor, isn't that a misnomer?
-        
+    def make_editor(self) -> QsciScintilla: 
         editor = QsciScintilla()
         editor.setUtf8(True)
         editor.setFont(self.window_font)
@@ -44,42 +44,101 @@ class MainWindow(QMainWindow):
         editor.setIndentationsUseTabs(False)
         editor.setAutoIndent(True)
         
-        # autocomplete todo
+        # autocomplete
+        editor.setAutoCompletionSource(QsciScintilla.AcsAll)
+        editor.setAutoCompletionThreshold(1) # auto complete shows after 1 character
+        editor.setAutoCompletionCaseSensitivity(False)
+        editor.setAutoCompletionUseSingle(QsciScintilla.AcusNever)
+
         # caret
+        editor.setCaretForegroundColor(QColor("#dedcdc")) 
+        editor.setCaretLineVisible(True)
+        editor.setCaretWidth(2)
+        # editor.setCaretLineBackgroundColor(QColor("#2c313c")) # color for the current line
+
         # EOL
         editor.setEolMode(QsciScintilla.EolWindows)
         editor.setEolVisibility(False)
         
-        # add lexer
-        editor.setLexer(None)
+        # add lexer for syntax highlighting
+        self.pylexer = QsciLexerPython() 
+        self.pylexer.setDefaultFont(self.window_font)
+
+        # API (you can add autocompletion using this) my reply: ???
+        self.api = QsciAPIs(self.pylexer)
+        for key in keyword.kwlist + dir(__builtins__): # adding builtin functions and keywords
+            self.api.add(key)
+        for _, name, _ in pkgutil.iter_modules(): # adding all module names from current interpreter
+            self.api.add(name)
+
+        # for test purposes
+        # you can add custom function with parameters as an example
+        # self.api.add("addition(a: int, b: int)")
+        self.api.prepare()
+
+        editor.setLexer(self.pylexer)
+
+        # line numbers
+        editor.setMarginType(0, QsciScintilla.NumberMargin)
+        editor.setMarginWidth(0, "000")
+        editor.setMarginsForegroundColor(QColor("#ff888888"))
+        editor.setMarginsBackgroundColor(QColor("#282c34"))
+        editor.setMarginsFont(self.window_font)
+
+        # keypress
+        editor.keyPressEvent = self.handle_editor_press
 
         return editor
 
+    def handle_editor_press(self, event: QKeyEvent):
+        "ctrl + space will show autocomplete"
+        editor = self.get_editor()
+        if not editor:
+            return # is this right ??
+        if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Space:
+            editor.autoCompleteFromAll()
+        else:
+            QsciScintilla.keyPressEvent(editor, event)
+
+        ...
+
     def set_new_tab(self, path: Path, is_new_file=False):
+        editor = self.make_editor()
+        if is_new_file:
+            self.tab_widget.addTab(editor, "untitled")
+            self.setWindowTitle("intitled")
+            self.statusBar().showMessage("Opened untitled")
+            self.tab_widget.setCurrentIndex(self.tab_widget.count() - 1)
+            self.current_file = None
+            return
+        
         if not path.is_file():
             return
-        if not is_new_file and self.is_binary(path):
+        if self.is_binary(path):
             self.statusBar().showMessage("Cannot open binary file")
             return
-        
-        if not is_new_file:
-            for i in range(self.tab_widget.count()):
-                if self.tab_widget.tabText(i) == path.name:
-                    self.tab_widget.setCurrentIndex(i)
-                    self.current_file = path
-                    return
+
+        # check if file is already open        
+        for i in range(self.tab_widget.count()):
+            if self.tab_widget.tabText(i) == path.name:
+                self.tab_widget.setCurrentIndex(i)
+                self.current_file = path
+                return
         
         # create new tab
-        editor = self.get_editor()
         self.tab_widget.addTab(editor, path.name)
-
-        if not is_new_file:
-            editor.setText(path.read_text())
+        editor.setText(path.read_text())
         self.setWindowTitle(path.name)
         self.current_file = path
         self.tab_widget.setCurrentIndex(self.tab_widget.count() - 1)
         self.statusBar().showMessage(f"Opened {path.name}", 2000)
 
+
+    def get_editor(self) -> QsciScintilla | None:
+        editor = self.tab_widget.currentWidget()
+        if editor is not None and not isinstance(editor, QsciScintilla):
+            raise Exception(f"expected QsciScintilla or None, found {type(editor)}")
+        return editor
 
 
     def is_binary(self, path: Path) -> bool:
@@ -107,13 +166,15 @@ class MainWindow(QMainWindow):
         open_folder.setShortcut("Ctrl+K+O")
         open_folder.triggered.connect(self.open_folder)
 
+        file_menu.addSeparator()
+
         save_file = file_menu.addAction("Save")
         save_file.setShortcut("Ctrl+S")
         save_file.triggered.connect(self.save_file)
 
-        save_file_as = file_menu.addAction("Save as")
-        save_file_as.setShortcut("Ctrl+Shift+S")
-        save_file_as.triggered.connect(self.save_file_as)
+        save_as = file_menu.addAction("Save as")
+        save_as.setShortcut("Ctrl+Shift+S")
+        save_as.triggered.connect(self.save_as)
 
         # ------- edit menu ------ #
         edit_menu = menu_bar.addMenu("Edit")
@@ -123,12 +184,74 @@ class MainWindow(QMainWindow):
         copy_action.triggered.connect(self.copy)
 
 
-    def new_file():...
-    def open_file():...
-    def open_folder():...
-    def save_file():...
-    def save_file_as():...
-    def copy():...
+    def new_file(self):
+        self.set_new_tab(None, is_new_file=True)
+
+
+    def open_file(self):
+        ops = QFileDialog.Options()
+        ops |= QFileDialog.DontUseNativeDialog
+        # add support for opening mulple files later
+        new_file, _ = QFileDialog.getOpenFileName(self, 
+            "Pick A File", "", "All Files (*);;Python Files (*.py)",
+            options=ops)
+        if new_file == "":
+            self.statusBar().showMessage("Cancelled", 2000)
+            return
+        f = Path(new_file)
+        self.set_new_tab(f)
+        
+
+    def open_folder(self):
+        ops = QFileDialog.Options()
+        ops |= QFileDialog.DontUseNativeDialog
+        new_folder = QFileDialog.getExistingDirectory(self, 
+            "Pick A Folder", "", options=ops)
+        if new_folder:
+            self.model.setRootPath(new_folder)
+            self.tree_view.setRootIndex(self.model.index(new_folder))
+            self.statusBar().showMessage(f"Opened {new_folder}", 2000)
+
+        
+
+
+    def save_file(self):
+        if self.current_file is None:
+            self.statusBar().showMessage("No File Selected", 2000)
+            return 
+        if self.current_file is None and self.tab_widget.count() > 0:
+            self.save_as()
+
+        editor = self.get_editor()
+        if editor is None:
+            self.statusBar().showMessage("No File Selected", 2000)
+            return
+        self.current_file.write_text(editor.text()) # doesnt recognize text
+        self.statusBar().showMessage(f"Saved {self.current_file.name}", 2000)
+
+    def save_as(self):
+        # requires user to remember specifying the extension
+        editor = self.get_editor()
+        if editor is None:
+            self.statusBar().showMessage("No File Selected", 2000)
+            return
+        file_path = QFileDialog.getSaveFileName(self, "Save As", os.getcwd())[0]
+        if file_path == "":
+            self.statusBar().showMessage("Cancelled", 2000)
+            return
+        path = Path(file_path)
+        path.write_text(editor.text())
+        self.tab_widget.setTabText(self.tab_widget.currentIndex(), path.name)
+        self.statusBar().showMessage(f"Saved {path.name}", 2000)
+        self.current_file = path
+
+    def copy(self):
+        editor = self.get_editor()
+        if editor is None:
+            self.statusBar().showMessage("No File Selected", 2000)
+            return
+        editor.copy()
+
 
 
     # ------------ body ------------ #
@@ -224,6 +347,7 @@ class MainWindow(QMainWindow):
         self.tab_widget.setTabsClosable(True)
         self.tab_widget.setMovable(True)
         self.tab_widget.setDocumentMode(True)
+        self.tab_widget.tabCloseRequested.connect(self.close_tab)
 
         self.hsplit.addWidget(self.tree_frame)
         self.hsplit.addWidget(self.tab_widget)
@@ -242,7 +366,8 @@ class MainWindow(QMainWindow):
 
     def show_hide_tab(self, _):...
 
-
+    def close_tab(self, index):
+        self.tab_widget.removeTab(index)
 
 if __name__ == '__main__':
     app = QApplication([])

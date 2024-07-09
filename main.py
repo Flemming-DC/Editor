@@ -4,11 +4,9 @@ from PyQt5 import *
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
 from PyQt5.Qsci import *
-from PyQt5.QtWidgets import QWidget
 import sys, os
 from pathlib import Path
-import keyword
-import pkgutil # list of installed packages
+from editor import Editor
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -33,74 +31,17 @@ class MainWindow(QMainWindow):
 
         self.show()
 
-    def make_editor(self) -> QsciScintilla: 
-        editor = QsciScintilla()
-        editor.setUtf8(True)
-        editor.setFont(self.window_font)
-        editor.setBraceMatching(QsciScintilla.SloppyBraceMatch)
+    def get_side_bar_icon(self, path, name) -> QLabel:
+        label = QLabel()
+        label.setPixmap(QPixmap(path).scaled(QSize(25, 25)))
+        label.setAlignment(Qt.AlignmentFlag.AlignTop)
+        label.setFont(self.window_font)
+        # label.mousePressEvent = self.show_hide_tab
+        label.mousePressEvent = lambda e: self.show_hide_tab(e, name)
+        return label
 
-        editor.setIndentationGuides(True)
-        editor.setTabWidth(4)
-        editor.setIndentationsUseTabs(False)
-        editor.setAutoIndent(True)
-        
-        # autocomplete
-        editor.setAutoCompletionSource(QsciScintilla.AcsAll)
-        editor.setAutoCompletionThreshold(1) # auto complete shows after 1 character
-        editor.setAutoCompletionCaseSensitivity(False)
-        editor.setAutoCompletionUseSingle(QsciScintilla.AcusNever)
-
-        # caret
-        editor.setCaretForegroundColor(QColor("#dedcdc")) 
-        editor.setCaretLineVisible(True)
-        editor.setCaretWidth(2)
-        # editor.setCaretLineBackgroundColor(QColor("#2c313c")) # color for the current line
-
-        # EOL
-        editor.setEolMode(QsciScintilla.EolWindows)
-        editor.setEolVisibility(False)
-        
-        # add lexer for syntax highlighting
-        self.pylexer = QsciLexerPython() 
-        self.pylexer.setDefaultFont(self.window_font)
-
-        # API (you can add autocompletion using this) my reply: ???
-        self.api = QsciAPIs(self.pylexer)
-        for key in keyword.kwlist + dir(__builtins__): # adding builtin functions and keywords
-            self.api.add(key)
-        for _, name, _ in pkgutil.iter_modules(): # adding all module names from current interpreter
-            self.api.add(name)
-
-        # for test purposes
-        # you can add custom function with parameters as an example
-        # self.api.add("addition(a: int, b: int)")
-        self.api.prepare()
-
-        editor.setLexer(self.pylexer)
-
-        # line numbers
-        editor.setMarginType(0, QsciScintilla.NumberMargin)
-        editor.setMarginWidth(0, "000")
-        editor.setMarginsForegroundColor(QColor("#ff888888"))
-        editor.setMarginsBackgroundColor(QColor("#282c34"))
-        editor.setMarginsFont(self.window_font)
-
-        # keypress
-        editor.keyPressEvent = self.handle_editor_press
-
-        return editor
-
-    def handle_editor_press(self, event: QKeyEvent):
-        "ctrl + space will show autocomplete"
-        editor = self.get_editor()
-        if not editor:
-            return # is this right ??
-        if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Space:
-            editor.autoCompleteFromAll()
-        else:
-            QsciScintilla.keyPressEvent(editor, event)
-
-        ...
+    def make_editor(self) -> Editor:
+        return Editor(self.window_font)
 
     def set_new_tab(self, path: Path, is_new_file=False):
         editor = self.make_editor()
@@ -279,11 +220,8 @@ class MainWindow(QMainWindow):
         side_bar_layout.setSpacing(0)
         side_bar_layout.setAlignment(Qt.AlignTop | Qt.AlignCenter)
 
-        folder_label = QLabel()
-        folder_label.setPixmap(QPixmap("./dependencies/icons/folder-icon-blue.svg").scaled(QSize(25, 25)))
-        folder_label.setAlignment(Qt.AlignmentFlag.AlignTop)
-        folder_label.setFont(self.window_font)
-        folder_label.mousePressEvent = self.show_hide_tab
+        folder_label = self.get_side_bar_icon(
+            "./dependencies/icons/folder-icon-blue.svg", "folder-icon")
         side_bar_layout.addWidget(folder_label)
         self.side_bar.setLayout(side_bar_layout)
 
@@ -357,14 +295,17 @@ class MainWindow(QMainWindow):
 
 
 
-    def tree_view_context_menu(self, pos):...
+    def tree_view_context_menu(self, pos):
+        ...
+
     def tree_view_clicked(self, index: QModelIndex):
         path = self.model.filePath(index)
         p = Path(path)
         self.set_new_tab(p)
 
 
-    def show_hide_tab(self, _):...
+    def show_hide_tab(self, event: QEvent, type_):
+        self.tree_frame.setVisible(not self.tree_frame.isVisible())
 
     def close_tab(self, index):
         self.tab_widget.removeTab(index)

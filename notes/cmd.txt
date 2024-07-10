@@ -1,5 +1,5 @@
 
-editor/Lib/Scripts/activate
+editor\Scripts\activate
 
 git add . && git commit -m "m" && git push
 

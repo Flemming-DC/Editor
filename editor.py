@@ -7,6 +7,7 @@ from PyQt5.QtWidgets import QWidget
 import keyword
 import pkgutil # list of installed packages
 from dependencies.icons import resources_rc
+from lexer import PyCustomLexer
 
 class Editor(QsciScintilla):
 
@@ -40,7 +41,7 @@ class Editor(QsciScintilla):
         self.setEolVisibility(False)
         
         # add lexer for syntax highlighting
-        self.pylexer = QsciLexerPython() 
+        self.pylexer = PyCustomLexer(parent=self) # QsciLexerPython() 
         self.pylexer.setDefaultFont(self.window_font)
 
         # API (you can add autocompletion using this) my reply: ???
